@@ -4,6 +4,7 @@ import "fmt"
 // import "encoding/json"
 
 type Person struct {
+	id: int64
     surname string
     forenames string
     gender string
@@ -14,7 +15,8 @@ type Person struct {
 func main() {
     fmt.Printf("hello, world\n")
 	
-	paul := Person{"Garner", "Paul", "Male", 0, 0}
+	john := Person{1, "Garner", "Frederick John", "Male", 0, 0}
+	paul := Person{2, "Garner", "Paul", "Male", 1, 0}
 	
 	paul.forenames = "Paul John"
 	
