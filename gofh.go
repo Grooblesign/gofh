@@ -8,85 +8,23 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 
 	"./models"
+	"./utils"
 )
 
 const (
 	DB_USER     = "postgres"
 	DB_PASSWORD = "Tazzle11!"
 	DB_NAME     = "FamilyHistory"
+
+	SERVER_PORT = 8880
 )
-
-type Citation struct {
-	Id       int64  `json:"id"`
-	Details  string `json:"details"`
-	SourceId int64  `json:"sourceId"`
-}
-
-type Event struct {
-	Id         int64  `json:"id"`
-	CitationId int64  `json:"citationId"`
-	Date       string `json:"date"`
-	Details    string `json:"details"`
-	EventType  string `json:"type"`
-	IsPrimary  bool   `json:"isPrimary"`
-	Location   string `json:"location"`
-	Notes      string `json:"notes"`
-	PersonId   int64  `json:"personId"`
-}
-
-type Marriage struct {
-	Id         int64  `json:"id"`
-	CitationId int64  `json:"citationId"`
-	Date       string `json:"date"`
-	HusbandId  int64  `json:"husbandId"`
-	Location   string `json:"location"`
-	Notes      string `json:"notes"`
-	WifeId     int64  `json:"wifeId"`
-}
-
-type Source struct {
-	Id         int64  `json:"id"`
-	Author     string `json:"author"`
-	Date       string `json:"date"`
-	Notes      string `json:"notes"`
-	Publisher  string `json:"publisher"`
-	SourceType string `json:"sourceType"`
-	Title      string `json:"title"`
-	Url        string `json:"url"`
-}
-
-type TimelineEvent struct {
-	Id        int64  `json:"id"`
-	Date      string `json:"date"`
-	Details   string `json:"details"`
-	EventType string `json:"type"`
-	IsPrimary bool   `json:"isPrimary"`
-	Location  string `json:"location"`
-}
-
-type ByDate []TimelineEvent
-
-func (s ByDate) Len() int {
-	return len(s)
-}
-func (s ByDate) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-func (s ByDate) Less(i, j int) bool {
-	iDateValue := getDateValue(s[i].Date)
-	jDateValue := getDateValue(s[j].Date)
-
-	return (iDateValue < jDateValue)
-}
 
 //-----------------------------------------------------------------------------
 // main
@@ -95,50 +33,52 @@ func (s ByDate) Less(i, j int) bool {
 func main() {
 	router := mux.NewRouter().StrictSlash(true)
 
+	addRoutes(router)
+
+	fmt.Println(fmt.Sprintf("Listening on %d...", SERVER_PORT))
+
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", SERVER_PORT), router))
+}
+
+//-----------------------------------------------------------------------------
+// addRoutes
+//-----------------------------------------------------------------------------
+
+func addRoutes(router *mux.Router) {
+
+	// HTML views
 	router.HandleFunc("/", index).Methods("GET")
+	router.HandleFunc("/view/censushousehold/{censusHouseholdId}", viewCensusHousehold).Methods("GET")
+	router.HandleFunc("/view/person/{personId}", viewPerson).Methods("GET")
+	router.HandleFunc("/view/persons/{surname}", viewPersons).Methods("GET")
 
+	// REST api
 	router.HandleFunc("/census", censusIndex).Methods("GET")
-
 	router.HandleFunc("/censushousehold", censusHouseholdIndex).Methods("GET")
 	router.HandleFunc("/censushousehold", censusHouseholdCreate).Methods("POST")
 	router.HandleFunc("/censushousehold", censusHouseholdUpdate).Methods("PUT")
-
 	router.HandleFunc("/censushouseholdperson", censusHouseholdPersonIndex).Methods("GET")
 	router.HandleFunc("/censushouseholdperson", censusHouseholdPersonCreate).Methods("POST")
 	router.HandleFunc("/censushouseholdperson", censusHouseholdPersonUpdate).Methods("PUT")
-
 	router.HandleFunc("/citation", citationIndex).Methods("GET")
 	router.HandleFunc("/citation", citationCreate).Methods("POST")
 	router.HandleFunc("/citation", citationUpdate).Methods("PUT")
-
 	router.HandleFunc("/event/{eventId}", eventDelete).Methods("DELETE")
 	router.HandleFunc("/event", eventCreate).Methods("POST")
 	router.HandleFunc("/event", eventUpdate).Methods("PUT")
-
 	router.HandleFunc("/marriage", marriageCreate).Methods("POST")
 	router.HandleFunc("/marriage", marriageUpdate).Methods("PUT")
-
 	router.HandleFunc("/person", personIndex).Methods("GET")
 	router.HandleFunc("/person/{personId}", personById).Methods("GET")
 	router.HandleFunc("/person/{personId}/censushousehold", personCensusHouseholds).Methods("GET")
 	router.HandleFunc("/person/{personId}/child", personChildren).Methods("GET")
 	router.HandleFunc("/person/{personId}/event", personEvents).Methods("GET")
 	router.HandleFunc("/person/{personId}/marriage", personMarriage).Methods("GET")
-
 	router.HandleFunc("/person", personCreate).Methods("POST")
 	router.HandleFunc("/person", personUpdate).Methods("PUT")
-
 	router.HandleFunc("/source", sourceIndex).Methods("GET")
 	router.HandleFunc("/source", sourceCreate).Methods("POST")
 	router.HandleFunc("/source", sourceUpdate).Methods("PUT")
-
-	router.HandleFunc("/view/censushousehold/{censusHouseholdId}", viewCensusHousehold).Methods("GET")
-	router.HandleFunc("/view/person/{personId}", viewPerson).Methods("GET")
-	router.HandleFunc("/view/persons/{surname}", viewPersons).Methods("GET")
-
-	fmt.Println("Listening on 8880...")
-
-	log.Fatal(http.ListenAndServe(":8880", router))
 }
 
 //-----------------------------------------------------------------------------
@@ -176,7 +116,7 @@ func censusHouseholdCreate(w http.ResponseWriter, r *http.Request) {
 	var censusHousehold models.CensusHousehold
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &censusHousehold); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -189,7 +129,7 @@ func censusHouseholdCreate(w http.ResponseWriter, r *http.Request) {
 	db := openDB()
 
 	_, err = db.Exec("INSERT INTO censushousehold (address, censusid, citationid, folio, notes, page, piece) VALUES ($1, $2, $3, $4, $5, $6, $7)", censusHousehold.Address, censusHousehold.CensusId, censusHousehold.CitationId, censusHousehold.Folio, censusHousehold.Notes, censusHousehold.Page, censusHousehold.Piece)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	db.Close()
 
@@ -205,7 +145,7 @@ func censusHouseholdUpdate(w http.ResponseWriter, r *http.Request) {
 	var censusHousehold models.CensusHousehold
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &censusHousehold); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -218,7 +158,7 @@ func censusHouseholdUpdate(w http.ResponseWriter, r *http.Request) {
 	db := openDB()
 
 	_, err = db.Exec("UPDATE censushousehold SET address=$2, censusid=$3, citationid=$4, folio=$5, notes=$6, page=$7, piece=$8 WHERE id=$1", censusHousehold.Id, censusHousehold.Address, censusHousehold.CensusId, censusHousehold.CitationId, censusHousehold.Folio, censusHousehold.Notes, censusHousehold.Page, censusHousehold.Piece)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	db.Close()
 }
@@ -232,7 +172,7 @@ func censusHouseholdPersonIndex(w http.ResponseWriter, r *http.Request) {
 	db := openDB()
 
 	rows, err := db.Query("SELECT id, age, birthplace, censushouseholdid, name, occupation, personid, relationshiptohead, rownumber, status FROM censushouseholdperson ORDER BY rownumber, id")
-	checkErr(err)
+	utils.CheckErr(err)
 
 	censusHouseholdPersons := []models.CensusHouseholdPerson{}
 
@@ -249,7 +189,7 @@ func censusHouseholdPersonIndex(w http.ResponseWriter, r *http.Request) {
 		var status sql.NullString
 
 		err = rows.Scan(&id, &age, &birthplace, &censusHouseholdId, &name, &occupation, &personid, &relationshipToHead, &rowNumber, &status)
-		checkErr(err)
+		utils.CheckErr(err)
 
 		censusHouseholdPerson := models.CensusHouseholdPerson{getInt64(id), getString(age), getString(birthplace), getInt64(censusHouseholdId), getString(name), getString(occupation), getInt64(personid), getString(relationshipToHead), getInt64(rowNumber), getString(status)}
 
@@ -273,7 +213,7 @@ func censusHouseholdPersonCreate(w http.ResponseWriter, r *http.Request) {
 	var censusHouseholdPerson models.CensusHouseholdPerson
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &censusHouseholdPerson); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -287,7 +227,7 @@ func censusHouseholdPersonCreate(w http.ResponseWriter, r *http.Request) {
 
 	_, err = db.Exec("INSERT INTO censushouseholdperson (age, birthplace, censushouseholdid, name, occupation, personid, relationshiptohead, rownumber, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)", censusHouseholdPerson.Age, censusHouseholdPerson.Birthplace, censusHouseholdPerson.CensusHouseholdId, censusHouseholdPerson.Name, censusHouseholdPerson.Occupation, censusHouseholdPerson.PersonId, censusHouseholdPerson.RelationshipToHead, censusHouseholdPerson.RowNumber, censusHouseholdPerson.Status)
 
-	checkErr(err)
+	utils.CheckErr(err)
 
 	db.Close()
 
@@ -303,7 +243,7 @@ func censusHouseholdPersonUpdate(w http.ResponseWriter, r *http.Request) {
 	var censusHouseholdPerson models.CensusHouseholdPerson
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &censusHouseholdPerson); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -317,7 +257,7 @@ func censusHouseholdPersonUpdate(w http.ResponseWriter, r *http.Request) {
 
 	_, err = db.Exec("UPDATE censushouseholdperson SET age=$2, birthplace=$3, censushouseholdid=$4, name=$5, occupation=$6, personid=$7, relationshiptohead=$8, rownumber=$9, status=$10 WHERE id=$1", censusHouseholdPerson.Id, censusHouseholdPerson.Age, censusHouseholdPerson.Birthplace, censusHouseholdPerson.CensusHouseholdId, censusHouseholdPerson.Name, censusHouseholdPerson.Occupation, censusHouseholdPerson.PersonId, censusHouseholdPerson.RelationshipToHead, censusHouseholdPerson.RowNumber, censusHouseholdPerson.Status)
 
-	checkErr(err)
+	utils.CheckErr(err)
 
 	db.Close()
 }
@@ -328,10 +268,10 @@ func censusHouseholdPersonUpdate(w http.ResponseWriter, r *http.Request) {
 
 func citationCreate(w http.ResponseWriter, r *http.Request) {
 
-	var citation Citation
+	var citation models.Citation
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &citation); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -345,7 +285,7 @@ func citationCreate(w http.ResponseWriter, r *http.Request) {
 
 	_, err = db.Exec("INSERT INTO citation (details, sourceid) VALUES ($1, $2)", citation.Details, citation.SourceId)
 
-	checkErr(err)
+	utils.CheckErr(err)
 
 	db.Close()
 
@@ -358,10 +298,10 @@ func citationCreate(w http.ResponseWriter, r *http.Request) {
 
 func citationUpdate(w http.ResponseWriter, r *http.Request) {
 
-	var citation Citation
+	var citation models.Citation
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &citation); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -376,7 +316,7 @@ func citationUpdate(w http.ResponseWriter, r *http.Request) {
 
 	_, err = db.Exec("UPDATE citation SEt details=$1, sourceid=$2 WHERE id=$3", citation.Details, citation.SourceId, citation.Id)
 
-	checkErr(err)
+	utils.CheckErr(err)
 }
 
 //-----------------------------------------------------------------------------
@@ -389,10 +329,10 @@ func citationIndex(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.Query("SELECT id, details, sourceid FROM citation ORDER BY id")
-	checkErr(err)
+	utils.CheckErr(err)
 	defer rows.Close()
 
-	citations := []Citation{}
+	citations := []models.Citation{}
 
 	for rows.Next() {
 		var id sql.NullInt64
@@ -400,9 +340,9 @@ func citationIndex(w http.ResponseWriter, r *http.Request) {
 		var sourceId sql.NullInt64
 
 		err = rows.Scan(&id, &details, &sourceId)
-		checkErr(err)
+		utils.CheckErr(err)
 
-		citation := Citation{getInt64(id), getString(details), getInt64(sourceId)}
+		citation := models.Citation{getInt64(id), getString(details), getInt64(sourceId)}
 
 		citations = append(citations, citation)
 	}
@@ -418,10 +358,10 @@ func citationIndex(w http.ResponseWriter, r *http.Request) {
 
 func eventCreate(w http.ResponseWriter, r *http.Request) {
 
-	var event Event
+	var event models.Event
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &event); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -437,7 +377,7 @@ func eventCreate(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("INSERT INTO event (citationid, date, details, type, isprimary, location, notes, personid) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
 		event.CitationId, event.Date, event.Details, event.EventType, event.IsPrimary, event.Location, event.Notes, event.PersonId)
 
-	checkErr(err)
+	utils.CheckErr(err)
 
 	w.WriteHeader(http.StatusCreated)
 }
@@ -449,14 +389,14 @@ func eventCreate(w http.ResponseWriter, r *http.Request) {
 func eventDelete(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	eventId, err := strconv.ParseInt(vars["eventId"], 10, 64)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	db := openDB()
 	defer db.Close()
 
 	_, err = db.Exec("DELETE FROM event WHERE id=$1", eventId)
 
-	checkErr(err)
+	utils.CheckErr(err)
 }
 
 //-----------------------------------------------------------------------------
@@ -465,10 +405,10 @@ func eventDelete(w http.ResponseWriter, r *http.Request) {
 
 func eventUpdate(w http.ResponseWriter, r *http.Request) {
 
-	var event Event
+	var event models.Event
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &event); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -484,7 +424,7 @@ func eventUpdate(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("UPDATE event SET citationid=$2, date=$3, details=$4, type=$5, isprimary=$6, location=$7, notes=$8, personid=$9 WHERE id=$1",
 		event.Id, event.CitationId, event.Date, event.Details, event.EventType, event.IsPrimary, event.Location, event.Notes, event.PersonId)
 
-	checkErr(err)
+	utils.CheckErr(err)
 }
 
 //-----------------------------------------------------------------------------
@@ -515,7 +455,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 	db := openDB()
 
 	rows, err := db.Query("SELECT surname, COUNT(*) AS total FROM person GROUP BY surname ORDER BY total DESC")
-	checkErr(err)
+	utils.CheckErr(err)
 
 	w.Write([]byte("<table>"))
 
@@ -531,7 +471,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 			var total sql.NullInt64
 
 			err = rows.Scan(&surname, &total)
-			checkErr(err)
+			utils.CheckErr(err)
 
 			w.Write([]byte("<td>"))
 			w.Write([]byte(fmt.Sprintf("<a href='http://localhost:8880/view/persons/%s'>%s</a>", getString(surname), getString(surname))))
@@ -564,10 +504,10 @@ func index(w http.ResponseWriter, r *http.Request) {
 
 func marriageCreate(w http.ResponseWriter, r *http.Request) {
 
-	var marriage Marriage
+	var marriage models.Marriage
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &marriage); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -583,7 +523,7 @@ func marriageCreate(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("INSERT INTO marriage (citationid, date, husbandid, location, notes, wifeid) VALUES ($1, $2, $3, $4, $5, $6)",
 		marriage.CitationId, marriage.Date, marriage.HusbandId, marriage.Location, marriage.Notes, marriage.WifeId)
 
-	checkErr(err)
+	utils.CheckErr(err)
 
 	w.WriteHeader(http.StatusCreated)
 }
@@ -594,10 +534,10 @@ func marriageCreate(w http.ResponseWriter, r *http.Request) {
 
 func marriageUpdate(w http.ResponseWriter, r *http.Request) {
 
-	var marriage Marriage
+	var marriage models.Marriage
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &marriage); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -613,7 +553,7 @@ func marriageUpdate(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("UPDATE marriage SET citationid=$2, date=$3, husbandid=$4, location=$5, notes=$6, wifeid=$7 WHERE id=$1",
 		marriage.Id, marriage.CitationId, marriage.Date, marriage.HusbandId, marriage.Location, marriage.Notes, marriage.WifeId)
 
-	checkErr(err)
+	utils.CheckErr(err)
 }
 
 //-----------------------------------------------------------------------------
@@ -636,7 +576,7 @@ func personIndex(w http.ResponseWriter, r *http.Request) {
 		rows, err = db.Query("SELECT id, fatherid, forenames, gender, motherid, notes, surname FROM person WHERE surname = $1 ORDER BY id", surname)
 	}
 
-	checkErr(err)
+	utils.CheckErr(err)
 	defer rows.Close()
 
 	persons := []models.	Person{}
@@ -657,7 +597,7 @@ func personIndex(w http.ResponseWriter, r *http.Request) {
 func personCensusHouseholds(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	personId, err := strconv.ParseInt(vars["personId"], 10, 64)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	censusHouseholds := getCensusHouseholdsForPerson(personId)
 
@@ -673,7 +613,7 @@ func personCensusHouseholds(w http.ResponseWriter, r *http.Request) {
 func personChildren(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	personId, err := strconv.ParseInt(vars["personId"], 10, 64)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	persons := getChildrenForPerson(personId)
 
@@ -691,7 +631,7 @@ func personCreate(w http.ResponseWriter, r *http.Request) {
 	var person models.Person
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &person); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -707,7 +647,7 @@ func personCreate(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("INSERT INTO person (fatherid, forenames, gender, motherid, notes, surname) VALUES ($1, $2, $3, $4, $5, $6)",
 		person.FatherId, person.Forenames, person.Gender, person.MotherId, person.Notes, person.Surname)
 
-	checkErr(err)
+	utils.CheckErr(err)
 
 	w.WriteHeader(http.StatusCreated)
 }
@@ -721,7 +661,7 @@ func personUpdate(w http.ResponseWriter, r *http.Request) {
 	var person models.Person
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &person); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -737,7 +677,7 @@ func personUpdate(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("UPDATE person SET fatherid=$1, forenames=$2, gender=$3, motherid=$4, notes=$5, surname=$6 WHERE id=$7",
 		person.FatherId, person.Forenames, person.Gender, person.MotherId, person.Notes, person.Surname, person.Id)
 
-	checkErr(err)
+	utils.CheckErr(err)
 }
 
 //-----------------------------------------------------------------------------
@@ -747,7 +687,7 @@ func personUpdate(w http.ResponseWriter, r *http.Request) {
 func personEvents(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	personId, err := strconv.ParseInt(vars["personId"], 10, 64)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	events := getEventsForPerson(personId)
 
@@ -763,7 +703,7 @@ func personEvents(w http.ResponseWriter, r *http.Request) {
 func personMarriage(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	personId, err := strconv.ParseInt(vars["personId"], 10, 64)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	marriages := getMarriagesForPerson(personId)
 
@@ -780,7 +720,7 @@ func personById(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
 	personId, err := strconv.ParseInt(vars["personId"], 10, 64)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	person := getPersonById(personId)
 
@@ -803,10 +743,10 @@ func sourceIndex(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.Query("SELECT id, author, date, notes, publisher, type, title, url FROM source ORDER BY id")
-	checkErr(err)
+	utils.CheckErr(err)
 	defer rows.Close()
 
-	sources := []Source{}
+	sources := []models.Source{}
 
 	for rows.Next() {
 		var id sql.NullInt64
@@ -819,9 +759,9 @@ func sourceIndex(w http.ResponseWriter, r *http.Request) {
 		var url sql.NullString
 
 		err = rows.Scan(&id, &author, &date, &notes, &publisher, &sourceType, &title, &url)
-		checkErr(err)
+		utils.CheckErr(err)
 
-		source := Source{getInt64(id), getString(author), getString(date), getString(notes), getString(publisher), getString(sourceType), getString(title), getString(url)}
+		source := models.Source{getInt64(id), getString(author), getString(date), getString(notes), getString(publisher), getString(sourceType), getString(title), getString(url)}
 
 		sources = append(sources, source)
 	}
@@ -837,10 +777,10 @@ func sourceIndex(w http.ResponseWriter, r *http.Request) {
 
 func sourceCreate(w http.ResponseWriter, r *http.Request) {
 
-	var source Source
+	var source models.Source
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &source); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -856,7 +796,7 @@ func sourceCreate(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("INSERT INTO source (author, date, notes, publisher, title, type, url) VALUES ($1, $2, $3, $4, $5, $6, $7)",
 		source.Author, source.Date, source.Notes, source.Publisher, source.Title, source.SourceType, source.Url)
 
-	checkErr(err)
+	utils.CheckErr(err)
 
 	w.WriteHeader(http.StatusCreated)
 }
@@ -867,10 +807,10 @@ func sourceCreate(w http.ResponseWriter, r *http.Request) {
 
 func sourceUpdate(w http.ResponseWriter, r *http.Request) {
 
-	var source Source
+	var source models.Source
 
 	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
-	checkErr(err)
+	utils.CheckErr(err)
 
 	if err := json.Unmarshal(body, &source); err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
@@ -886,17 +826,7 @@ func sourceUpdate(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("UPDATE source SET author=$1, date=$2, notes=$3, publisher=$4, title=$5, type=$6, url=$7 WHERE id=$8",
 		source.Author, source.Date, source.Notes, source.Publisher, source.Title, source.SourceType, source.Url, source.Id)
 
-	checkErr(err)
-}
-
-//-----------------------------------------------------------------------------
-// checkErr
-//-----------------------------------------------------------------------------
-
-func checkErr(err error) {
-	if err != nil {
-		panic(err)
-	}
+	utils.CheckErr(err)
 }
 
 //-----------------------------------------------------------------------------
@@ -917,7 +847,7 @@ func getCensusHouseholds(censusHouseholdId int64) []models.CensusHousehold {
 		rows, err = db.Query("SELECT id, address, censusid, citationid, folio, notes, page, piece FROM censushousehold WHERE id = $1 ORDER BY id", censusHouseholdId)
 	}
 
-	checkErr(err)
+	utils.CheckErr(err)
 	defer rows.Close()
 
 	censusHouseholds := []models.CensusHousehold{}
@@ -933,7 +863,7 @@ func getCensusHouseholds(censusHouseholdId int64) []models.CensusHousehold {
 		var piece sql.NullString
 
 		err = rows.Scan(&id, &address, &censusId, &citationId, &folio, &notes, &page, &piece)
-		checkErr(err)
+		utils.CheckErr(err)
 
 		censusHousehold := models.CensusHousehold{getInt64(id), getString(address), getInt64(censusId), getInt64(citationId), getString(folio), getString(notes), getString(page), getString(piece), []models.CensusHouseholdPerson{}}
 
@@ -943,7 +873,7 @@ func getCensusHouseholds(censusHouseholdId int64) []models.CensusHousehold {
 	for index, censusHousehold := range censusHouseholds {
 		rows, err = db.Query("SELECT id, age, birthplace, censushouseholdid, name, occupation, personid, relationshiptohead, rownumber, status FROM censushouseholdperson WHERE censushouseholdid = $1 ORDER BY rownumber, id", censusHousehold.Id)
 
-		checkErr(err)
+		utils.CheckErr(err)
 
 		persons := []models.CensusHouseholdPerson{}
 
@@ -960,7 +890,7 @@ func getCensusHouseholds(censusHouseholdId int64) []models.CensusHousehold {
 			var status sql.NullString
 
 			err = rows.Scan(&id, &age, &birthplace, &censusHouseholdId, &name, &occupation, &personid, &relationshipToHead, &rownumber, &status)
-			checkErr(err)
+			utils.CheckErr(err)
 
 			censusHouseholdPerson := models.CensusHouseholdPerson{getInt64(id), getString(age), getString(birthplace), getInt64(censusHouseholdId), getString(name), getString(occupation), getInt64(personid), getString(relationshipToHead), getInt64(rownumber), getString(status)}
 
@@ -1012,7 +942,7 @@ func getPersonFromRow(rows *sql.Rows) models.Person {
 	var surname sql.NullString
 
 	err := rows.Scan(&id, &fatherId, &forenames, &gender, &motherId, &notes, &surname)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	return models.Person{getInt64(id), getInt64(fatherId), getString(forenames), getString(gender), getInt64(motherId), getString(notes), getString(surname)}
 }
@@ -1037,7 +967,7 @@ func openDB() *sql.DB {
 	dbinfo := fmt.Sprintf("user=%s password=%s dbname=%s port=5433 sslmode=disable",
 		DB_USER, DB_PASSWORD, DB_NAME)
 	db, err := sql.Open("postgres", dbinfo)
-	checkErr(err)
+	utils.CheckErr(err)
 	return db
 }
 
@@ -1049,7 +979,7 @@ func viewCensusHousehold(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
 	censusHouseholdId, err := strconv.ParseInt(vars["censusHouseholdId"], 10, 64)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	w.Header().Set("Content-Type", "text/html")
 
@@ -1139,7 +1069,7 @@ func viewPerson(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
 	personId, err := strconv.ParseInt(vars["personId"], 10, 64)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	thisPerson := getPersonById(personId)
 
@@ -1163,10 +1093,10 @@ func viewPerson(w http.ResponseWriter, r *http.Request) {
 		father := getPersonById(thisPerson.FatherId)
 		mother := getPersonById(thisPerson.MotherId)
 
-		var fatherBirth *Event = nil
-		var fatherDeath *Event = nil
-		var motherBirth *Event = nil
-		var motherDeath *Event = nil
+		var fatherBirth *models.Event= nil
+		var fatherDeath *models.Event= nil
+		var motherBirth *models.Event= nil
+		var motherDeath *models.Event= nil
 
 		if father != nil {
 			fatherBirth = getPrimaryEvent(father.Id, "Birth")
@@ -1271,16 +1201,16 @@ func viewPerson(w http.ResponseWriter, r *http.Request) {
 		censuses := getCensuses()
 		censusHouseholds := getCensusHouseholdsForPerson(personId)
 
-		timelineEvents := []TimelineEvent{}
+		timelineEvents := []models.TimelineEvent{}
 
 		for _, event := range events {
-			timelineEvents = append(timelineEvents, TimelineEvent{event.Id, event.Date, event.Details, event.EventType, event.IsPrimary, event.Location})
+			timelineEvents = append(timelineEvents, models.TimelineEvent{event.Id, event.Date, event.Details, event.EventType, event.IsPrimary, event.Location})
 		}
 
 		for _, child := range children {
 			childBirth := getPrimaryEvent(child.Id, "Birth")
 			if childBirth != nil {
-				timelineEvents = append(timelineEvents, TimelineEvent{child.Id, childBirth.Date, child.GetFullName(), "Child Born", childBirth.IsPrimary, childBirth.Location})
+				timelineEvents = append(timelineEvents, models.TimelineEvent{child.Id, childBirth.Date, child.GetFullName(), "Child Born", childBirth.IsPrimary, childBirth.Location})
 			}
 		}
 
@@ -1293,7 +1223,7 @@ func viewPerson(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if spouse != nil {
-				timelineEvents = append(timelineEvents, TimelineEvent{marriage.Id, marriage.Date, spouse.GetFullName(), "Marriage", false, marriage.Location})
+				timelineEvents = append(timelineEvents, models.TimelineEvent{marriage.Id, marriage.Date, spouse.GetFullName(), "Marriage", false, marriage.Location})
 			}
 		}
 
@@ -1307,11 +1237,11 @@ func viewPerson(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if censusHousehold != nil {
-				timelineEvents = append(timelineEvents, TimelineEvent{censusHousehold.Id, census.Date, "", "Census", false, censusHousehold.Address})
+				timelineEvents = append(timelineEvents, models.TimelineEvent{censusHousehold.Id, census.Date, "", "Census", false, censusHousehold.Address})
 			}
 		}
 
-		sort.Sort(ByDate(timelineEvents))
+		sort.Sort(models.ByDate(timelineEvents))
 
 		w.Write([]byte("<table width='100%'>"))
 		w.Write([]byte("<thead>"))
@@ -1471,12 +1401,12 @@ func viewPerson(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("</thead>"))
 
 		for _, child := range children {
-			var birth *Event = getPrimaryEvent(child.Id, "Birth")
+			var birth *models.Event= getPrimaryEvent(child.Id, "Birth")
 			if birth == nil {
 				birth = getPrimaryEvent(child.Id, "Baptism")
 			}
 
-			var death *Event = getPrimaryEvent(child.Id, "Death")
+			var death *models.Event= getPrimaryEvent(child.Id, "Death")
 			if death == nil {
 				death = getPrimaryEvent(child.Id, "Burial")
 			}
@@ -1543,12 +1473,12 @@ func viewPersons(w http.ResponseWriter, r *http.Request) {
 	sort.Sort(models.ByName(persons))
 
 	for _, person := range persons {
-		var birth *Event = getPrimaryEvent(person.Id, "Birth")
+		var birth *models.Event= getPrimaryEvent(person.Id, "Birth")
 		if birth == nil {
 			birth = getPrimaryEvent(person.Id, "Baptism")
 		}
 
-		var death *Event = getPrimaryEvent(person.Id, "Death")
+		var death *models.Event= getPrimaryEvent(person.Id, "Death")
 		if death == nil {
 			death = getPrimaryEvent(person.Id, "Burial")
 		}
@@ -1585,14 +1515,14 @@ func viewPersons(w http.ResponseWriter, r *http.Request) {
 // getEventsForPerson
 //-----------------------------------------------------------------------------
 
-func getEventsForPerson(personId int64) []Event {
+func getEventsForPerson(personId int64) []models.Event{
 
 	db := openDB()
 
 	rows, err := db.Query("SELECT id, citationid, date, details, isprimary, location, notes, personid, type FROM event WHERE personid = $1 ORDER BY id", personId)
-	checkErr(err)
+	utils.CheckErr(err)
 
-	events := []Event{}
+	events := []models.Event{}
 
 	for rows.Next() {
 		var id sql.NullInt64
@@ -1606,9 +1536,9 @@ func getEventsForPerson(personId int64) []Event {
 		var personId sql.NullInt64
 
 		err = rows.Scan(&id, &citationId, &date, &details, &isPrimary, &location, &notes, &personId, &eventType)
-		checkErr(err)
+		utils.CheckErr(err)
 
-		event := Event{getInt64(id), getInt64(citationId), getString(date), getString(details), getString(eventType), getBool(isPrimary), getString(location), getString(notes), getInt64(personId)}
+		event := models.Event{getInt64(id), getInt64(citationId), getString(date), getString(details), getString(eventType), getBool(isPrimary), getString(location), getString(notes), getInt64(personId)}
 
 		events = append(events, event)
 	}
@@ -1628,7 +1558,7 @@ func getChildrenForPerson(personId int64) []models.Person {
 	db := openDB()
 
 	rows, err := db.Query("SELECT id, fatherid, forenames, gender, motherid, notes, surname FROM person WHERE fatherid = $1 OR motherId = $1 ORDER BY id", personId)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	persons := []models.Person{}
 
@@ -1646,14 +1576,14 @@ func getChildrenForPerson(personId int64) []models.Person {
 // getEventsForPerson
 //-----------------------------------------------------------------------------
 
-func getMarriagesForPerson(personId int64) []Marriage {
+func getMarriagesForPerson(personId int64) []models.Marriage {
 
 	db := openDB()
 
 	rows, err := db.Query("SELECT id, citationid, date, husbandid, location, notes, wifeid FROM marriage WHERE husbandid = $1 OR wifeid = $1 ORDER BY id", personId)
-	checkErr(err)
+	utils.CheckErr(err)
 
-	marriages := []Marriage{}
+	marriages := []models.Marriage{}
 
 	for rows.Next() {
 		var id sql.NullInt64
@@ -1665,9 +1595,9 @@ func getMarriagesForPerson(personId int64) []Marriage {
 		var wifeId sql.NullInt64
 
 		err = rows.Scan(&id, &citationId, &date, &husbandId, &location, &notes, &wifeId)
-		checkErr(err)
+		utils.CheckErr(err)
 
-		marriage := Marriage{getInt64(id), getInt64(citationId), getString(date), getInt64(husbandId), getString(location), getString(notes), getInt64(wifeId)}
+		marriage := models.Marriage{getInt64(id), getInt64(citationId), getString(date), getInt64(husbandId), getString(location), getString(notes), getInt64(wifeId)}
 
 		marriages = append(marriages, marriage)
 	}
@@ -1687,7 +1617,7 @@ func getPersonById(personId int64) *models.Person {
 	db := openDB()
 
 	rows, err := db.Query("SELECT id, fatherid, forenames, gender, motherid, notes, surname FROM person WHERE id = $1", personId)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	var person *models.Person = nil
 	if rows.Next() {
@@ -1710,7 +1640,7 @@ func getPersonsBySurname(surname string) []models.Person {
 	db := openDB()
 
 	rows, err := db.Query("SELECT id, fatherid, forenames, gender, motherid, notes, surname FROM person WHERE surname = $1", surname)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	persons := []models.Person{}
 
@@ -1743,7 +1673,7 @@ func getCensusHouseholdsForPerson(personId int64) []models.CensusHousehold {
 	db := openDB()
 
 	rows, err := db.Query("SELECT censushouseholdid FROM censushouseholdperson WHERE personid = $1 ORDER BY id", personId)
-	checkErr(err)
+	utils.CheckErr(err)
 
 	censusHouseholdIds := []int64{}
 
@@ -1751,7 +1681,7 @@ func getCensusHouseholdsForPerson(personId int64) []models.CensusHousehold {
 		var censusHouseholdId sql.NullInt64
 
 		err = rows.Scan(&censusHouseholdId)
-		checkErr(err)
+		utils.CheckErr(err)
 
 		censusHouseholdIds = append(censusHouseholdIds, getInt64(censusHouseholdId))
 	}
@@ -1777,7 +1707,7 @@ func getCensuses() []models.Census {
 	db := openDB()
 
 	rows, err := db.Query("SELECT id, date, title FROM census ORDER BY id")
-	checkErr(err)
+	utils.CheckErr(err)
 
 	censuses := []models.Census{}
 
@@ -1787,7 +1717,7 @@ func getCensuses() []models.Census {
 		var title sql.NullString
 
 		err = rows.Scan(&id, &date, &title)
-		checkErr(err)
+		utils.CheckErr(err)
 
 		census := models.Census{getInt64(id), getString(date), getString(title)}
 
@@ -1838,20 +1768,20 @@ func writeStylesheet(w http.ResponseWriter) {
 // getPrimaryEvent
 //-----------------------------------------------------------------------------
 
-func getPrimaryEvent(personId int64, eventType string) *Event {
+func getPrimaryEvent(personId int64, eventType string) *models.Event{
 
 	db := openDB()
 
 	rows, err := db.Query("SELECT id, citationid, date, details, isprimary, location, notes, personid, type FROM event WHERE personid = $1 AND type = $2 AND isprimary ORDER BY id", personId, eventType)
-	checkErr(err)
+	utils.CheckErr(err)
 
-	var event *Event = nil
+	var event *models.Event= nil
 
 	if rows.Next() {
 		event = getEventFromRow(rows)
 	} else {
 		rows, err = db.Query("SELECT id, citationid, date, details, isprimary, location, notes, personid, type FROM event WHERE personid = $1 AND type = $2 ORDER BY id", personId, eventType)
-		checkErr(err)
+		utils.CheckErr(err)
 		if rows.Next() {
 			event = getEventFromRow(rows)
 		}
@@ -1867,7 +1797,7 @@ func getPrimaryEvent(personId int64, eventType string) *Event {
 // getEventFromRow
 //-----------------------------------------------------------------------------
 
-func getEventFromRow(rows *sql.Rows) *Event {
+func getEventFromRow(rows *sql.Rows) *models.Event{
 
 	var id sql.NullInt64
 	var citationId sql.NullInt64
@@ -1880,83 +1810,7 @@ func getEventFromRow(rows *sql.Rows) *Event {
 	var personId sql.NullInt64
 
 	err := rows.Scan(&id, &citationId, &date, &details, &isPrimary, &location, &notes, &personId, &eventType)
-	checkErr(err)
+	utils.CheckErr(err)
 
-	return &Event{getInt64(id), getInt64(citationId), getString(date), getString(details), getString(eventType), getBool(isPrimary), getString(location), getString(notes), getInt64(personId)}
-}
-
-//-----------------------------------------------------------------------------
-// getDateValue
-//-----------------------------------------------------------------------------
-
-func getDateValue(date string) int64 {
-
-	// fmt.Println("-------------")
-	// fmt.Println(date)
-
-	var adjustment int64
-	var err error
-	var match bool
-	var value int64 = 99999999
-	var value1 int64
-	var value2 int64
-
-	months := "JANFEBMARAPRMAYJUNJULAUGSEPOCTNOVDEC"
-
-	dashPos := strings.Index(date, "-")
-	if dashPos > -1 {
-		date = strings.TrimRight(date[:dashPos], " ")
-	}
-
-	match, _ = regexp.MatchString("^bef", date)
-	if match {
-		adjustment = -1
-		date = date[4:]
-	}
-
-	match, _ = regexp.MatchString("^aft", date)
-	if match {
-		adjustment = 1
-		date = date[4:]
-	}
-
-	match, _ = regexp.MatchString("^[0-9]{4}", date)
-	if match {
-		value1, err = strconv.ParseInt(date[0:4], 10, 64)
-		value = value1 * 10000
-		checkErr(err)
-	}
-
-	match, _ = regexp.MatchString("^Q[0-9]{1} ([0-9]{4})$", date)
-	if match {
-		value1, err = strconv.ParseInt(date[3:7], 10, 64)
-		checkErr(err)
-		value2, err = strconv.ParseInt(date[1:2], 10, 64)
-		checkErr(err)
-
-		value = (value1 * 10000) + 100 + ((value2 - 1) * 300)
-	}
-
-	match, _ = regexp.MatchString("^[0-9]{2} [a-zA-Z]{3} ([0-9]{4})$", date)
-	if match {
-		value1, err = strconv.ParseInt(date[7:11], 10, 64)
-		value = (value1 * 10000)
-		value2, err = strconv.ParseInt(date[0:2], 10, 64)
-		value = (value + value2)
-		value = value + (int64)(((strings.Index(months, strings.ToUpper(date[3:6]))/3)+1)*100)
-	}
-
-	match, _ = regexp.MatchString("^[a-zA-Z]{3} ([0-9]{4})", date)
-	if match {
-		value1, err = strconv.ParseInt(date[4:8], 10, 64)
-		value = (value1 * 10000)
-		value = value + (int64)(((strings.Index(months, strings.ToUpper(date[0:3]))/3)+1)*100)
-	}
-
-	value = value + adjustment
-
-	// fmt.Println(value)
-	// fmt.Println("-------------")
-
-	return value
+	return &models.Event{getInt64(id), getInt64(citationId), getString(date), getString(details), getString(eventType), getBool(isPrimary), getString(location), getString(notes), getInt64(personId)}
 }
