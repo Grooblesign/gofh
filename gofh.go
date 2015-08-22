@@ -1140,14 +1140,14 @@ func viewPerson(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(father.GetFullName()))
 			w.Write([]byte("</td>"))
 			if fatherBirth != nil {
-				w.Write([]byte(fmt.Sprintf("<td>%s %s</td>", fatherBirth.Date, fatherBirth.Location)))
+				w.Write([]byte("<td width='30%'>" + fmt.Sprintf("%s %s</td>", fatherBirth.Date, fatherBirth.Location)))
 			} else {
-				w.Write([]byte("<td>&nbsp;</td>"))
+				w.Write([]byte("<td width='30%'>&nbsp;</td>"))
 			}
 			if fatherDeath != nil {
-				w.Write([]byte(fmt.Sprintf("<td>%s %s</td>", fatherDeath.Date, fatherDeath.Location)))
+				w.Write([]byte("<td width='30%'>" + fmt.Sprintf("%s %s</td>", fatherDeath.Date, fatherDeath.Location)))
 			} else {
-				w.Write([]byte("<td>&nbsp;</td>"))
+				w.Write([]byte("<td width='30%'>&nbsp;</td>"))
 			}
 		} else {
 			w.Write([]byte("<td width='10%'>&nbsp;</td>"))

@@ -18,7 +18,7 @@ func GetDateValue(date string) int64 {
 	var match bool
 	var value int64
 
-	months := "JANFEBMARAPRMAYJUNJULAUGSEPOCTNOVDEC"
+	const months = "JANFEBMARAPRMAYJUNJULAUGSEPOCTNOVDEC"
 
 	dashPos := strings.Index(date, "-")
 	if dashPos > -1 {
