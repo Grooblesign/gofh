@@ -441,7 +441,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 
 	writeStylesheet(w)
 
-	w.Write([]byte("<H1>Welcome to Go Family History!</H1>"))
+	w.Write([]byte("<H1>Go Family History!</H1>"))
 	
 	w.Write([]byte("<h2>Show surnames starting with:</h2>"))
 
