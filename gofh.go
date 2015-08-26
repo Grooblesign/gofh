@@ -50,6 +50,7 @@ func addRoutes(router *mux.Router) {
 	router.HandleFunc("/", index).Methods("GET")
 	router.HandleFunc("/view/censushousehold/{censusHouseholdId}", viewCensusHousehold).Methods("GET")
 	router.HandleFunc("/view/person/{personId}", viewPerson).Methods("GET")
+	router.HandleFunc("/view/person/{personId}/ancestors", viewPersonAncestors).Methods("GET")
 	router.HandleFunc("/view/persons/{surname}", viewPersons).Methods("GET")
 
 	// REST api
@@ -1056,6 +1057,78 @@ func viewCensusHousehold(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write([]byte("</table>"))
+
+	w.Write([]byte("</body>"))
+	w.Write([]byte("</html>"))
+}
+
+//-----------------------------------------------------------------------------
+// viewPersonAncestors
+//-----------------------------------------------------------------------------
+
+func viewPersonAncestors(w http.ResponseWriter, r *http.Request) {
+
+	vars := mux.Vars(r)
+	personId, err := strconv.ParseInt(vars["personId"], 10, 64)
+	utils.CheckErr(err)
+
+	thisPerson := getPersonById(personId)
+
+	w.Header().Set("Content-Type", "text/html")
+
+	w.Write([]byte("<html>"))
+	w.Write([]byte("<head>"))
+
+	writeStylesheet(w)
+
+	w.Write([]byte("</head>"))
+	w.Write([]byte("<body>"))
+
+	if thisPerson != nil {
+		w.Write([]byte(fmt.Sprintf("<h1>%s</h1>", thisPerson.GetFullName())))
+
+		generation := 0
+
+		nextGenerationIds := []int64{}
+
+		if thisPerson.FatherId > 0 {
+			nextGenerationIds = append(nextGenerationIds, thisPerson.FatherId)
+		}
+
+		if thisPerson.MotherId > 0 {
+			nextGenerationIds = append(nextGenerationIds, thisPerson.MotherId)
+		}
+
+		for len(nextGenerationIds) > 0 {
+			generation++
+
+			w.Write([]byte(fmt.Sprintf("<h2>%d</h2>", generation)))
+
+			thisGenerationIds := []int64{}
+
+			for _, id := range nextGenerationIds {
+				thisGenerationIds = append(thisGenerationIds, id)
+			}
+
+			nextGenerationIds = nextGenerationIds[:0]
+
+			for _, id := range thisGenerationIds {
+				person := getPersonById(id)
+
+				w.Write([]byte(fmt.Sprintf("%s<br />", person.GetFullName())))
+
+				if person.FatherId > 0 {
+					nextGenerationIds = append(nextGenerationIds, person.FatherId)
+				}
+				if person.MotherId > 0 {
+					nextGenerationIds = append(nextGenerationIds, person.MotherId)
+				}
+			}
+
+		}
+	} else {
+		w.Write([]byte("<h2>Person not found</h2>"))
+	}
 
 	w.Write([]byte("</body>"))
 	w.Write([]byte("</html>"))
