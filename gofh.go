@@ -52,6 +52,7 @@ func addRoutes(router *mux.Router) {
 	router.HandleFunc("/view/person/{personId}", viewPerson).Methods("GET")
 	router.HandleFunc("/view/person/{personId}/ancestors", viewPersonAncestors).Methods("GET")
 	router.HandleFunc("/view/persons/{surname}", viewPersons).Methods("GET")
+	router.HandleFunc("/view/surnames/{startLetter}", viewSurnames).Methods("GET")
 
 	// REST api
 	router.HandleFunc("/census", censusIndex).Methods("GET")
@@ -447,7 +448,11 @@ func index(w http.ResponseWriter, r *http.Request) {
 
 	w.Write([]byte("<table>"))
 	w.Write([]byte("<tr>"))
-	w.Write([]byte("<td>&nbsp;</td><td>A</td><td>B</td><td>C</td><td>D</td><td>E</td><td>F</td><td>G</td><td>H</td><td>I</td><td>J</td><td>K</td><td>L</td><td>M</td><td>N</td><td>O</td><td>P</td><td>Q</td><td>R</td><td>S</td><td>T</td><td>U</td><td>V</td><td>W</td><td>X</td><td>Y</td><td>Z</td>"))
+
+	for _, letter := range "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+		w.Write([]byte(fmt.Sprintf("<td><a href='http://localhost:8880/view/surnames/%s'>%s</a></td>", string(letter), string(letter))))
+	}
+
 	w.Write([]byte("</tr>"))
 	w.Write([]byte("</table>"))
 
@@ -1124,7 +1129,6 @@ func viewPersonAncestors(w http.ResponseWriter, r *http.Request) {
 					nextGenerationIds = append(nextGenerationIds, person.MotherId)
 				}
 			}
-
 		}
 	} else {
 		w.Write([]byte("<h2>Person not found</h2>"))
@@ -1582,6 +1586,63 @@ func viewPersons(w http.ResponseWriter, r *http.Request) {
 
 	w.Write([]byte("</body>"))
 	w.Write([]byte("</html>"))
+}
+
+//-----------------------------------------------------------------------------
+// viewSurnames
+//-----------------------------------------------------------------------------
+
+func viewSurnames(w http.ResponseWriter, r *http.Request) {
+
+	vars := mux.Vars(r)
+	
+	startLetter := vars["startLetter"]
+
+	w.Header().Set("Content-Type", "text/html")
+
+	w.Write([]byte("<html>"))
+	w.Write([]byte("<head>"))
+
+	writeStylesheet(w)
+
+	w.Write([]byte("</head>"))
+	w.Write([]byte("<body>"))
+
+	w.Write([]byte(fmt.Sprintf("<h1>Surnames starting with %s</h1>", startLetter)))
+
+	db := openDB()
+
+	rows, err := db.Query(fmt.Sprintf("SELECT surname, COUNT(*) AS total FROM person WHERE surname LIKE '%s%s' GROUP BY surname ORDER BY surname", startLetter, "%"))
+	utils.CheckErr(err)
+
+	w.Write([]byte("<table>"))
+
+	for rows.Next() {
+		w.Write([]byte("<tr>"))
+
+		var surname sql.NullString
+		var total sql.NullInt64
+
+		err = rows.Scan(&surname, &total)
+		utils.CheckErr(err)
+
+		w.Write([]byte("<td>"))
+		w.Write([]byte(fmt.Sprintf("<a href='http://localhost:8880/view/persons/%s'>%s</a>", getString(surname), getString(surname))))
+		w.Write([]byte("</td>"))
+		w.Write([]byte("<td>"))
+		w.Write([]byte(fmt.Sprintf("%d", getInt64(total))))
+		w.Write([]byte("</td>"))
+
+		w.Write([]byte("</tr>"))
+	}
+
+	w.Write([]byte("</table>"))
+
+	w.Write([]byte("</body>"))
+	w.Write([]byte("</html>"))
+
+	rows.Close()
+	db.Close()
 }
 
 //-----------------------------------------------------------------------------
