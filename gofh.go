@@ -20,7 +20,7 @@ import (
 
 const (
 	DB_USER     = "postgres"
-	DB_PASSWORD = "Tazzle11!"
+	DB_PASSWORD = "Tazzle1!"
 	DB_NAME     = "FamilyHistory"
 
 	SERVER_PORT = 8880
@@ -970,7 +970,7 @@ func getString(value sql.NullString) string {
 //-----------------------------------------------------------------------------
 
 func openDB() *sql.DB {
-	dbinfo := fmt.Sprintf("user=%s password=%s dbname=%s port=5433 sslmode=disable",
+	dbinfo := fmt.Sprintf("user=%s password=%s dbname=%s port=5432 sslmode=disable",
 		DB_USER, DB_PASSWORD, DB_NAME)
 	db, err := sql.Open("postgres", dbinfo)
 	utils.CheckErr(err)
