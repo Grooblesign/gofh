@@ -49,6 +49,8 @@ func addRoutes(router *mux.Router) {
 	// HTML views
 	router.HandleFunc("/", index).Methods("GET")
 	router.HandleFunc("/view/censushousehold/{censusHouseholdId}", viewCensusHousehold).Methods("GET")
+	router.HandleFunc("/view/event/{eventId}", viewEvent).Methods("GET")
+	router.HandleFunc("/view/marriage/{marriageId}", viewMarriage).Methods("GET")
 	router.HandleFunc("/view/person/{personId}", viewPerson).Methods("GET")
 	router.HandleFunc("/view/person/{personId}/ancestors", viewPersonAncestors).Methods("GET")
 	router.HandleFunc("/view/persons/{surname}", viewPersons).Methods("GET")
@@ -442,7 +444,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 
 	writeStylesheet(w)
 
-	w.Write([]byte("<H1>Family History v0.0.0.1</H1>"))
+	w.Write([]byte("<H1>Family History</H1>"))
 	
 	w.Write([]byte("<h2>Show surnames starting with:</h2>"))
 
@@ -934,6 +936,26 @@ func getInt64(value sql.NullInt64) int64 {
 }
 
 //-----------------------------------------------------------------------------
+// getMarriageFromRow
+//-----------------------------------------------------------------------------
+
+func getMarriageFromRow(rows *sql.Rows) models.Marriage {
+
+	var id sql.NullInt64
+	var husbandId sql.NullInt64
+	var wifeId sql.NullInt64
+	var date sql.NullString
+	var location sql.NullString
+	var notes sql.NullString
+	var citationId sql.NullInt64
+
+	err := rows.Scan(&id, &husbandId, &wifeId, &date, &location, &notes, &citationId)
+	utils.CheckErr(err)
+
+	return models.Marriage{getInt64(id), getInt64(citationId), getString(date), getInt64(husbandId), getString(location), getString(notes), getInt64(wifeId)}
+}
+
+//-----------------------------------------------------------------------------
 // getPersonFromRow
 //-----------------------------------------------------------------------------
 
@@ -1137,6 +1159,104 @@ func viewPersonAncestors(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("</body>"))
 	w.Write([]byte("</html>"))
 }
+
+//-----------------------------------------------------------------------------
+// viewEvent
+//-----------------------------------------------------------------------------
+
+func viewEvent(w http.ResponseWriter, r *http.Request) {
+
+	vars := mux.Vars(r)
+	eventId, err := strconv.ParseInt(vars["eventId"], 10, 64)
+	utils.CheckErr(err)
+
+	thisEvent := getEventById(eventId)
+
+	w.Header().Set("Content-Type", "text/html")
+
+	w.Write([]byte("<html>"))
+	w.Write([]byte("<head>"))
+
+	writeStylesheet(w)
+
+	w.Write([]byte("</head>"))
+	w.Write([]byte("<body>"))
+
+	w.Write([]byte("<h1>Event</h1>"))
+
+	w.Write([]byte(fmt.Sprintf("<p>%d</p>", thisEvent.PersonId)))
+	w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisEvent.EventType)))
+	w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisEvent.Date)))
+	w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisEvent.Location)))
+	w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisEvent.Details)))
+	w.Write([]byte(fmt.Sprintf("<p>%d</p>", thisEvent.CitationId)))
+
+	if thisEvent.CitationId > 0 {
+		thisCitation := getCitationById(thisEvent.CitationId)
+
+		w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisCitation.Details)))
+	}
+
+}	
+
+//-----------------------------------------------------------------------------
+// viewMarriage
+//-----------------------------------------------------------------------------
+
+func viewMarriage(w http.ResponseWriter, r *http.Request) {
+
+	vars := mux.Vars(r)
+	marriageId, err := strconv.ParseInt(vars["marriageId"], 10, 64)
+	utils.CheckErr(err)
+
+	thisMarriage := getMarriageById(marriageId)
+
+	husband := getPersonById(thisMarriage.HusbandId)
+	wife := getPersonById(thisMarriage.WifeId)
+
+	w.Header().Set("Content-Type", "text/html")
+
+	w.Write([]byte("<html>"))
+	w.Write([]byte("<head>"))
+
+	writeStylesheet(w)
+
+	w.Write([]byte("</head>"))
+	w.Write([]byte("<body>"))
+
+	w.Write([]byte("<h1>Marriage</h1>"))
+
+	w.Write([]byte(fmt.Sprintf("<p>%d</p>", thisMarriage.HusbandId)))
+	w.Write([]byte(fmt.Sprintf("<p>%s</p>", husband.GetFullName())))
+	w.Write([]byte(fmt.Sprintf("<p>%d</p>", thisMarriage.WifeId)))
+	w.Write([]byte(fmt.Sprintf("<p>%s</p>", wife.GetFullName())))
+	w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisMarriage.Date)))
+	w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisMarriage.Location)))
+	w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisMarriage.Notes)))
+	w.Write([]byte(fmt.Sprintf("<p>%d</p>", thisMarriage.CitationId)))
+
+	if thisMarriage.CitationId > 0 {
+		thisCitation := getCitationById(thisMarriage.CitationId)
+
+		w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisCitation.Details)))
+	}
+
+	/*
+	w.Write([]byte("<table width='75%'>"))
+	w.Write([]byte("<thead>"))
+	w.Write([]byte("<tr>"))
+	w.Write([]byte("<th>Id</th>"))
+	w.Write([]byte("<th>Name</th>"))
+	w.Write([]byte("<th>Birth</th>"))
+	w.Write([]byte("<th>Death</th>"))
+	w.Write([]byte("</tr>"))
+	w.Write([]byte("</thead>"))
+	w.Write([]byte("</table>"))
+
+	w.Write([]byte("</body>"))
+	w.Write([]byte("</html>"))
+	*/
+}	
 
 //-----------------------------------------------------------------------------
 // viewPerson
@@ -1740,6 +1860,90 @@ func getMarriagesForPerson(personId int64) []models.Marriage {
 	db.Close()
 
 	return marriages
+}
+
+//-----------------------------------------------------------------------------
+// getMarriageById
+//-----------------------------------------------------------------------------
+
+func getMarriageById(marriageId int64) *models.Marriage {
+
+	db := openDB()
+
+	rows, err := db.Query("SELECT id, husbandid, wifeid, date, location, notes, citationid FROM marriage WHERE id = $1", marriageId)
+	utils.CheckErr(err)
+
+	var marriage *models.Marriage = nil
+	if rows.Next() {
+		_marriage := getMarriageFromRow(rows)
+		marriage = &_marriage
+	}
+
+	rows.Close()
+	db.Close()
+
+	return marriage
+}
+
+//-----------------------------------------------------------------------------
+// getEventById
+//-----------------------------------------------------------------------------
+
+func getEventById(eventId int64) *models.Event {
+
+	db := openDB()
+
+	rows, err := db.Query("SELECT id, citationid, date, details, isprimary, location, notes, personid, type FROM event WHERE id = $1", eventId)
+	utils.CheckErr(err)
+
+	var event *models.Event = nil
+	if rows.Next() {
+		event = getEventFromRow(rows)
+	}
+
+	rows.Close()
+	db.Close()
+
+	return event
+}
+
+//-----------------------------------------------------------------------------
+// getCitationById
+//-----------------------------------------------------------------------------
+
+func getCitationById(citationId int64) *models.Citation {
+
+	db := openDB()
+
+	rows, err := db.Query("SELECT id, sourceid, details FROM citation WHERE id = $1", citationId)
+	utils.CheckErr(err)
+
+	var citation *models.Citation = nil
+	if rows.Next() {
+		_citation := getCitationFromRow(rows)
+		citation = &_citation
+	}
+
+	rows.Close()
+	db.Close()
+
+	return citation
+}
+
+//-----------------------------------------------------------------------------
+// getCitationFromRow
+//-----------------------------------------------------------------------------
+
+func getCitationFromRow(rows *sql.Rows) models.Citation {
+
+	var id sql.NullInt64
+	var sourceId sql.NullInt64
+	var details sql.NullString
+
+	err := rows.Scan(&id, &sourceId, &details)
+	utils.CheckErr(err)
+
+	return models.Citation{getInt64(id), getString(details), getInt64(sourceId)}
 }
 
 //-----------------------------------------------------------------------------
