@@ -23,6 +23,8 @@ const (
 	DB_PASSWORD = "Tazzle1!"
 	DB_NAME     = "FamilyHistory"
 
+	APP_JSON = "application/json"
+
 	SERVER_PORT = 8880
 )
 
@@ -93,7 +95,7 @@ func censusIndex(w http.ResponseWriter, r *http.Request) {
 
 	censuses := getCensuses()
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", APP_JSON)
 
 	json.NewEncoder(w).Encode(censuses)
 }
@@ -106,7 +108,7 @@ func censusHouseholdIndex(w http.ResponseWriter, r *http.Request) {
 
 	censusHouseholds := getCensusHouseholds(0)
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", APP_JSON)
 
 	json.NewEncoder(w).Encode(censusHouseholds)
 }
