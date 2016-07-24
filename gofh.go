@@ -1197,8 +1197,13 @@ func viewEvent(w http.ResponseWriter, r *http.Request) {
 		thisCitation := getCitationById(thisEvent.CitationId)
 
 		w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisCitation.Details)))
-	}
 
+		if thisCitation.SourceId > 0 {
+			thisSource := getSourceById(thisCitation.SourceId)
+
+			w.Write([]byte(fmt.Sprintf("<p>%s</p>", thisSource.Title)))
+		}
+	}
 }	
 
 //-----------------------------------------------------------------------------
